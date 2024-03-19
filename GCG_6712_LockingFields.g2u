@@ -1,0 +1,140 @@
+﻿Program.Sub.Preflight.Start
+V.Global.sError.Declare(String)
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: Arturo Almaguer
+'Date: 21 April 2022
+'Customer: Warrior Rig Technologies, quote number 13177
+'This program locks/unlocks the PL field, PL browser and GL browser when criteria is met
+'This script is triggered from different hooks stated below
+
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+
+	V.Local.sSQL.Declare(String)
+	V.Local.sPart.Declare(String)
+	V.Local.sLocation.Declare(String)
+	V.Local.sPL.Declare(String)
+	V.Local.bFlag.Declare(Boolean)
+	
+	F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+		
+		F.Intrinsic.Control.Case(12010)
+		'SO Lines screen populate hook
+		
+			'v.Passed.000019 SO Lines GL Account Browser, v.Passed.000018 SO Lines GL Account field
+			'Disabling GL account field and browser
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000019, "LOCK", 1) 
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000018, "LOCK", 1) 
+	
+		F.Intrinsic.Control.Case(16630)
+		'WO header populate hook
+		
+			'v.Passed.000023 Product Line field, v.Passed.000024 Product Line Browser
+			'Disabling product line field and browser
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000023, "LOCK", 1) 
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000024, "LOCK", 1) 
+		
+		F.Intrinsic.Control.Case(16661)
+		'WO Header part change hook
+			
+			'v.Passed.000012 Part Number, v.Passed.000013 Part Rev, v.Passed.000015 Part Loc
+			F.Intrinsic.String.GSSPartString(v.Passed.000012, v.Passed.000013, V.Local.sPart)
+			V.Local.sLocation.Set(v.Passed.000015)
+			
+			'Validating whether part exits in inventory master
+			f.Intrinsic.String.Build("select RTRIM(PART) PART from V_INVENTORY_MSTR where PART = '{0}' and LOCATION = '{1}';", V.Local.sPart, V.Local.sLocation, v.Local.sSQL)
+			F.ODBC.Connection!Con.OpenCompanyConnection
+			f.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL,v.Local.sSQL)
+			F.ODBC.Connection!Con.Close
+			
+			'Unlocking product line field and browser if part doesn't exist. Leaving them locked if it does. 
+			F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000023, "LOCK", 0) 
+				F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000024, "LOCK", 0) 
+			F.Intrinsic.Control.EndIf
+		
+		F.Intrinsic.Control.Case(17050)
+		'PO Lines screen populate hook
+			
+			'v.Passed.000019 PO Lines GL Browser, v.Passed.000018 PO Lines GL Account field
+			'Disabling acontrols stated above
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000019, "LOCK", 1)
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000018, "LOCK", 1) 
+
+		F.Intrinsic.Control.Case(17060)
+		'PO Lines screen save button hook
+		
+			'v.Passed.000008 Part Number, v.Passed.000009 Part Rev, v.Passed.000011 Part Loc, v.Passed.000012 Product Line
+			F.Intrinsic.String.GSSPartString(v.Passed.000008, v.Passed.000009, V.Local.sPart)
+			f.Intrinsic.String.Replace(V.Local.sPart, "*", " ", V.Local.sPart)
+			V.Local.sLocation.Set(v.Passed.000011)
+			V.Local.sPL.Set(v.Passed.000012)
+			
+			'Validating whether part exits in inventory master
+			F.ODBC.Connection!Con.OpenCompanyConnection
+			f.Intrinsic.String.Build("select RTRIM(PART) PART from V_INVENTORY_MSTR where PART = '{0}' and LOCATION = '{1}';", V.Local.sPart, V.Local.sLocation, v.Local.sSQL)
+			f.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL,v.Local.sSQL)
+			
+			F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, False)
+				
+				'Part = inventory part, validating PL 
+				f.Intrinsic.String.Build("select PUR_IS_INV_ACCT from V_PL_MASTER where PROD_LINE = '{0}';", V.Local.sPL, v.Local.sSQL)
+				f.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL,v.Local.bFlag)
+				
+				'PL is for non-inventory accounts, display error.
+				F.Intrinsic.Control.If(V.Local.bFlag, =, False)
+					F.Intrinsic.UI.Msgbox("Selected PL is not for inventory parts. Please modify the PL to save line.", "ERROR")
+					V.Passed.777777.Set(1)
+				F.Intrinsic.Control.EndIf
+			
+			f.Intrinsic.Control.Else
+				
+				'Part = non-inventory part, validating PL
+				f.Intrinsic.String.Build("select PUR_IS_INV_ACCT from V_PL_MASTER where PROD_LINE = '{0}';", V.Local.sPL, v.Local.sSQL)
+				f.ODBC.Connection!Con.ExecuteAndReturn(v.Local.sSQL,v.Local.bFlag)
+				
+				'PL is for inventory accounts, display error.
+				F.Intrinsic.Control.If(V.Local.bFlag, =, True)
+					F.Intrinsic.UI.Msgbox("Selected PL is not for non-inventory parts. Please modify the PL to save line.", "ERROR")
+					V.Passed.777777.Set(1)
+				F.Intrinsic.Control.EndIf
+			
+			F.Intrinsic.Control.EndIf
+			F.ODBC.Connection!Con.Close
+		
+		F.Intrinsic.Control.Case(10260)
+		'Quote Lines Populate hook 10992
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000019, "LOCK", 1) 
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000018, "LOCK", 1) 
+		
+	F.Intrinsic.Control.EndSelect
+
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+Program.Sub.CatchError.Start
+'To display the error
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}", V.Ambient.ScriptPath, V.Ambient.Newline, V.Ambient.SubroutineCalledFrom, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Ambient.GABVersion, V.Global.sError) 
+F.Intrinsic.UI.Msgbox(V.Global.sError)
+F.Intrinsic.Control.CallSub("Unload")
+Program.Sub.CatchError.End
+Program.Sub.Unload.Start
+'Closes the connection if it is open
+f.Intrinsic.Control.If(v.ODBC.con.exists,=,"1") 	
+    f.ODBC.Connection!Con.Close
+f.Intrinsic.Control.EndIf
+
+'Ending program
+F.Intrinsic.Control.End
+Program.Sub.Unload.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8474.24170$}$1
+${$6$}$triley$}$20230508110650848$}$iK6nerqp9nur1h1iSBfRKBBz1ENCgYv63svESamd5a9d3JG7oOlQezm8ypQUbXJmgfe/O0kUBwI=
+Program.Sub.Comments.End
